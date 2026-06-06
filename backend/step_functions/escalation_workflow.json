@@ -1,0 +1,265 @@
+{
+  "Comment": "BloodBridge AI — Donor escalation state machine. Checks inventory, matches donors, sends urgency-tiered notifications, escalates through backup donors, then to NGO.",
+  "StartAt": "CheckInventory",
+  "States": {
+    "CheckInventory": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "bb-check-inventory",
+        "Payload.$": "$"
+      },
+      "ResultPath": "$.inventory_result",
+      "Next": "InventoryDecision",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "MatchDonors"
+        }
+      ],
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ]
+    },
+
+    "InventoryDecision": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.inventory_result.Payload.inventory_available",
+          "BooleanEquals": true,
+          "Next": "ReserveInventory"
+        }
+      ],
+      "Default": "MatchDonors"
+    },
+
+    "ReserveInventory": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "bb-reserve-inventory",
+        "Payload.$": "$"
+      },
+      "ResultPath": "$.reserve_result",
+      "Next": "FulfillRequest"
+    },
+
+    "FulfillRequest": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "bb-update-request-status",
+        "Payload": {
+          "request_id.$": "$.request_id",
+          "status": "fulfilled",
+          "source": "inventory"
+        }
+      },
+      "ResultPath": "$.fulfill_result",
+      "Next": "FeedbackLoop"
+    },
+
+    "MatchDonors": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "bb-match-donors",
+        "Payload.$": "$"
+      },
+      "ResultPath": "$.match_result",
+      "Next": "SetDonorIndex",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 2,
+          "BackoffRate": 1.5
+        }
+      ]
+    },
+
+    "SetDonorIndex": {
+      "Type": "Pass",
+      "Parameters": {
+        "request_id.$": "$.request_id",
+        "patient_id.$": "$.patient_id",
+        "blood_group.$": "$.blood_group",
+        "urgency_level.$": "$.urgency_level",
+        "wait_seconds.$": "$.wait_seconds",
+        "collection_date.$": "$.collection_date",
+        "ranked_donors.$": "$.match_result.Payload.ranked_donors",
+        "current_donor_index": 0,
+        "max_escalation_attempts": 3
+      },
+      "Next": "HasDonors"
+    },
+
+    "HasDonors": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.ranked_donors[0]",
+          "IsPresent": true,
+          "Next": "NotifyDonor"
+        }
+      ],
+      "Default": "EscalateToNGO"
+    },
+
+    "NotifyDonor": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "bb-send-notification",
+        "Payload.$": "$"
+      },
+      "ResultPath": "$.notify_result",
+      "Next": "DetermineWait"
+    },
+
+    "DetermineWait": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.urgency_level",
+          "StringEquals": "critical",
+          "Next": "WaitCritical"
+        },
+        {
+          "Variable": "$.urgency_level",
+          "StringEquals": "high",
+          "Next": "WaitHigh"
+        }
+      ],
+      "Default": "WaitStandard"
+    },
+
+    "WaitCritical": {
+      "Type": "Wait",
+      "Seconds": 7200,
+      "Next": "CheckResponse"
+    },
+
+    "WaitHigh": {
+      "Type": "Wait",
+      "Seconds": 21600,
+      "Next": "CheckResponse"
+    },
+
+    "WaitStandard": {
+      "Type": "Wait",
+      "Seconds": 86400,
+      "Next": "CheckResponse"
+    },
+
+    "CheckResponse": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "bb-check-response",
+        "Payload.$": "$"
+      },
+      "ResultPath": "$.response_result",
+      "Next": "ResponseDecision"
+    },
+
+    "ResponseDecision": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.response_result.Payload.donor_confirmed",
+          "BooleanEquals": true,
+          "Next": "ScheduleDonation"
+        }
+      ],
+      "Default": "CanEscalate"
+    },
+
+    "CanEscalate": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.current_donor_index",
+          "NumericLessThan": 2,
+          "Next": "IncrementDonorIndex"
+        }
+      ],
+      "Default": "EscalateToNGO"
+    },
+
+    "IncrementDonorIndex": {
+      "Type": "Pass",
+      "Parameters": {
+        "request_id.$": "$.request_id",
+        "patient_id.$": "$.patient_id",
+        "blood_group.$": "$.blood_group",
+        "urgency_level.$": "$.urgency_level",
+        "wait_seconds.$": "$.wait_seconds",
+        "collection_date.$": "$.collection_date",
+        "ranked_donors.$": "$.ranked_donors",
+        "current_donor_index.$": "States.MathAdd($.current_donor_index, 1)",
+        "max_escalation_attempts.$": "$.max_escalation_attempts"
+      },
+      "Next": "NotifyDonor"
+    },
+
+    "ScheduleDonation": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "bb-schedule-donation",
+        "Payload.$": "$"
+      },
+      "ResultPath": "$.schedule_result",
+      "Next": "FeedbackLoop"
+    },
+
+    "EscalateToNGO": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "bb-escalate-ngo",
+        "Payload.$": "$"
+      },
+      "ResultPath": "$.escalation_result",
+      "Next": "LogNGOFailure"
+    },
+
+    "LogNGOFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "bb-feedback-loop",
+        "Payload": {
+          "request_id.$": "$.request_id",
+          "outcome": "ngo_escalated",
+          "blood_group.$": "$.blood_group"
+        }
+      },
+      "ResultPath": "$.log_result",
+      "Next": "EndNGO"
+    },
+
+    "EndNGO": {
+      "Type": "Succeed"
+    },
+
+    "FeedbackLoop": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "bb-feedback-loop",
+        "Payload.$": "$"
+      },
+      "ResultPath": "$.feedback_result",
+      "End": true
+    }
+  }
+}

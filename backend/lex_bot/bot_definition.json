@@ -1,0 +1,129 @@
+{
+  "botName": "DonorResponseBot",
+  "description": "BloodBridge AI donor interaction bot. Handles donation confirmation, rescheduling, declining, and FAQ queries.",
+  "dataPrivacy": { "childDirected": false },
+  "idleSessionTTLInSeconds": 300,
+  "roleArn": "REPLACE_WITH_LEX_ROLE_ARN",
+  "botLocales": [
+    {
+      "localeId": "en_IN",
+      "nluIntentConfidenceThreshold": 0.4,
+      "voiceSettings": { "voiceId": "Aditi", "engine": "neural" },
+      "intents": [
+        {
+          "name": "ConfirmDonation",
+          "description": "Donor confirms they will donate blood",
+          "fulfillmentCodeHook": { "enabled": true },
+          "sampleUtterances": [
+            { "utterance": "Yes" },
+            { "utterance": "Yes I will donate" },
+            { "utterance": "I can donate" },
+            { "utterance": "Confirm" },
+            { "utterance": "I'm available" },
+            { "utterance": "Count me in" },
+            { "utterance": "Sure" },
+            { "utterance": "OK" },
+            { "utterance": "I'll be there" },
+            { "utterance": "Happy to help" }
+          ],
+          "intentConfirmationSetting": {
+            "promptSpecification": {
+              "messageGroups": [
+                {
+                  "message": {
+                    "plainTextMessage": {
+                      "value": "Great! Just to confirm — you'll donate {blood_group} blood on {collection_date}. Is that correct?"
+                    }
+                  }
+                }
+              ],
+              "maxRetries": 2
+            },
+            "declinationResponse": {
+              "messageGroups": [
+                {
+                  "message": {
+                    "plainTextMessage": {
+                      "value": "No problem! Would you like to reschedule instead?"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "RescheduleDonation",
+          "description": "Donor wants to reschedule to a different date",
+          "fulfillmentCodeHook": { "enabled": true },
+          "sampleUtterances": [
+            { "utterance": "Reschedule" },
+            { "utterance": "Can I change the date" },
+            { "utterance": "Different date" },
+            { "utterance": "Not available on that day" },
+            { "utterance": "Can we move it to {NewDate}" },
+            { "utterance": "I'm free on {NewDate}" },
+            { "utterance": "How about {NewDate}" }
+          ],
+          "slots": [
+            {
+              "name": "NewDate",
+              "slotTypeName": "AMAZON.Date",
+              "valueElicitationSetting": {
+                "slotConstraint": "Required",
+                "promptSpecification": {
+                  "messageGroups": [
+                    {
+                      "message": {
+                        "plainTextMessage": {
+                          "value": "What date works best for you? (e.g. next Monday, June 15)"
+                        }
+                      }
+                    }
+                  ],
+                  "maxRetries": 2
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "DeclineDonation",
+          "description": "Donor cannot or does not want to donate",
+          "fulfillmentCodeHook": { "enabled": true },
+          "sampleUtterances": [
+            { "utterance": "No" },
+            { "utterance": "I can't donate" },
+            { "utterance": "Not available" },
+            { "utterance": "Sorry I can't" },
+            { "utterance": "Decline" },
+            { "utterance": "Not this time" },
+            { "utterance": "I'm not able to" },
+            { "utterance": "Remove me" }
+          ]
+        },
+        {
+          "name": "AskQuestion",
+          "description": "Donor asks about donation process, blood bank location, eligibility",
+          "fulfillmentCodeHook": { "enabled": true },
+          "sampleUtterances": [
+            { "utterance": "Help" },
+            { "utterance": "Where do I donate" },
+            { "utterance": "How long does it take" },
+            { "utterance": "What should I eat before donating" },
+            { "utterance": "Am I eligible" },
+            { "utterance": "What is the blood bank address" },
+            { "utterance": "FAQ" },
+            { "utterance": "More info" }
+          ]
+        },
+        {
+          "name": "FallbackIntent",
+          "description": "Catches anything not matched by other intents",
+          "parentIntentSignature": "AMAZON.FallbackIntent",
+          "fulfillmentCodeHook": { "enabled": true }
+        }
+      ]
+    }
+  ]
+}
