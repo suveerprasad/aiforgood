@@ -51,6 +51,7 @@ def create_blood_request(data: CreateRequestInput):
             assigned_donors = unit_ids
             logger.info(f"Request {request_id}: inventory matched ({len(unit_ids)} units)")
 
+    from decimal import Decimal
     item = {
         "request_id": request_id,
         "created_at": datetime.utcnow().isoformat(),
@@ -58,12 +59,17 @@ def create_blood_request(data: CreateRequestInput):
         "blood_group": data.blood_group,
         "units_needed": data.units_needed,
         "urgency_level": urgency.value,
+        "transfusion_date": data.transfusion_date,
         "status": status,
         "collection_window_start": str(window_start),
         "collection_window_end": str(window_end),
         "notes": data.notes or "",
         "assigned_donors": assigned_donors,
     }
+    if data.patient_lat is not None:
+        item["patient_lat"] = Decimal(str(data.patient_lat))
+    if data.patient_lon is not None:
+        item["patient_lon"] = Decimal(str(data.patient_lon))
 
     _requests_table().put_item(Item=item)
     return BloodRequest(**item)

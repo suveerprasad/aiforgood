@@ -50,6 +50,11 @@ def compute_donor_score(
     except (ValueError, TypeError):
         d_lat, d_lon = 0.0, 0.0
 
+    # If donor has no coordinates (both zero), treat as same city as patient
+    # so newly registered donors without GPS data are still considered local
+    if d_lat == 0.0 and d_lon == 0.0:
+        d_lat, d_lon = patient_lat, patient_lon
+
     dist_km = haversine(patient_lat, patient_lon, d_lat, d_lon)
     distance_score = max(0.0, (1.0 - dist_km / max_radius_km) * 100.0)
 
@@ -82,8 +87,11 @@ def compute_donor_score(
 
     return {
         "user_id": donor["user_id"],
+        "name": donor.get("name", ""),
+        "phone_number": donor.get("phone_number", ""),
+        "email": donor.get("email", ""),
         "blood_group": donor.get("blood_group", ""),
-        "donor_type": donor.get("donor_type", ""),
+        "role": donor.get("role", donor.get("donor_type", "")),
         "distance_km": round(dist_km, 2),
         "donor_score": round(final_score, 2),
         "eligibility_score": round(eligibility_score, 2),

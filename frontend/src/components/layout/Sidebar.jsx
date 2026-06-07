@@ -1,7 +1,8 @@
-import { NavLink } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router-dom'
 import {
-  LayoutDashboard, Droplets, Users, Package, Sparkles, Activity
+  LayoutDashboard, Droplets, Users, Package, Sparkles, Activity, LogOut
 } from 'lucide-react'
+import { useAuth } from '../../contexts/AuthContext'
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -12,6 +13,14 @@ const navItems = [
 ]
 
 export default function Sidebar() {
+  const { user, logout } = useAuth()
+  const nav = useNavigate()
+
+  const handleLogout = () => {
+    logout()
+    nav('/login')
+  }
+
   return (
     <aside className="w-64 min-h-screen bg-white border-r border-slate-200 flex flex-col">
       {/* Logo */}
@@ -48,9 +57,27 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* Footer */}
-      <div className="px-5 py-4 border-t border-slate-100">
-        <p className="text-xs text-slate-400">Blood Warriors Foundation</p>
+      {/* User info + logout */}
+      <div className="px-4 py-4 border-t border-slate-100">
+        {user && (
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
+              {(user.name || 'A')[0].toUpperCase()}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium text-slate-800 truncate">{user.name}</p>
+              <p className="text-xs text-slate-400 capitalize">{user.system_role?.replace('_', ' ')}</p>
+            </div>
+          </div>
+        )}
+        <button
+          onClick={handleLogout}
+          className="flex items-center gap-2 w-full text-left px-2 py-1.5 text-xs text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+        >
+          <LogOut className="w-3.5 h-3.5" />
+          Sign Out
+        </button>
+        <p className="text-xs text-slate-400 mt-3">Blood Warriors Foundation</p>
         <p className="text-xs text-slate-400">AI for Good 2.0</p>
       </div>
     </aside>

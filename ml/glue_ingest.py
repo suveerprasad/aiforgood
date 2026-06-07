@@ -24,7 +24,7 @@ from botocore.exceptions import ClientError
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("bloodbridge.ingest")
 
-REGION = os.getenv("AWS_REGION", "ap-south-1")
+REGION = os.getenv("AWS_REGION", "us-east-1")
 S3_BUCKET = os.getenv("S3_BUCKET", "bloodbridge-data")
 S3_KEY = os.getenv("S3_KEY", "data/Dataset.csv")
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
@@ -38,6 +38,7 @@ TABLES = {
             {"AttributeName": "blood_group", "AttributeType": "S"},
             {"AttributeName": "bridge_id", "AttributeType": "S"},
         ],
+        "BillingMode": "PAY_PER_REQUEST",
         "GlobalSecondaryIndexes": [
             {
                 "IndexName": "role-blood_group-index",
@@ -46,27 +47,22 @@ TABLES = {
                     {"AttributeName": "blood_group", "KeyType": "RANGE"},
                 ],
                 "Projection": {"ProjectionType": "ALL"},
-                "ProvisionedThroughput": {"ReadCapacityUnits": 5, "WriteCapacityUnits": 5},
             },
             {
                 "IndexName": "bridge_id-index",
                 "KeySchema": [{"AttributeName": "bridge_id", "KeyType": "HASH"}],
                 "Projection": {"ProjectionType": "ALL"},
-                "ProvisionedThroughput": {"ReadCapacityUnits": 5, "WriteCapacityUnits": 5},
             },
         ],
-        "ProvisionedThroughput": {"ReadCapacityUnits": 10, "WriteCapacityUnits": 10},
     },
     "bb_requests": {
         "KeySchema": [
             {"AttributeName": "request_id", "KeyType": "HASH"},
-            {"AttributeName": "created_at", "KeyType": "RANGE"},
         ],
         "AttributeDefinitions": [
             {"AttributeName": "request_id", "AttributeType": "S"},
-            {"AttributeName": "created_at", "AttributeType": "S"},
         ],
-        "ProvisionedThroughput": {"ReadCapacityUnits": 5, "WriteCapacityUnits": 5},
+        "BillingMode": "PAY_PER_REQUEST",
     },
     "bb_inventory": {
         "KeySchema": [{"AttributeName": "blood_unit_id", "KeyType": "HASH"}],
@@ -75,6 +71,7 @@ TABLES = {
             {"AttributeName": "blood_group", "AttributeType": "S"},
             {"AttributeName": "status", "AttributeType": "S"},
         ],
+        "BillingMode": "PAY_PER_REQUEST",
         "GlobalSecondaryIndexes": [
             {
                 "IndexName": "blood_group-status-index",
@@ -83,21 +80,26 @@ TABLES = {
                     {"AttributeName": "status", "KeyType": "RANGE"},
                 ],
                 "Projection": {"ProjectionType": "ALL"},
-                "ProvisionedThroughput": {"ReadCapacityUnits": 5, "WriteCapacityUnits": 5},
             }
         ],
-        "ProvisionedThroughput": {"ReadCapacityUnits": 5, "WriteCapacityUnits": 5},
     },
     "bb_notifications": {
         "KeySchema": [
             {"AttributeName": "notification_id", "KeyType": "HASH"},
-            {"AttributeName": "sent_at", "KeyType": "RANGE"},
         ],
         "AttributeDefinitions": [
             {"AttributeName": "notification_id", "AttributeType": "S"},
-            {"AttributeName": "sent_at", "AttributeType": "S"},
         ],
-        "ProvisionedThroughput": {"ReadCapacityUnits": 5, "WriteCapacityUnits": 5},
+        "BillingMode": "PAY_PER_REQUEST",
+    },
+    "bb_auth_users": {
+        "KeySchema": [
+            {"AttributeName": "email", "KeyType": "HASH"},
+        ],
+        "AttributeDefinitions": [
+            {"AttributeName": "email", "AttributeType": "S"},
+        ],
+        "BillingMode": "PAY_PER_REQUEST",
     },
     "bb_sessions": {
         "KeySchema": [
@@ -108,7 +110,7 @@ TABLES = {
             {"AttributeName": "donor_id", "AttributeType": "S"},
             {"AttributeName": "session_id", "AttributeType": "S"},
         ],
-        "ProvisionedThroughput": {"ReadCapacityUnits": 5, "WriteCapacityUnits": 5},
+        "BillingMode": "PAY_PER_REQUEST",
     },
 }
 
@@ -116,12 +118,31 @@ UNKNOWN_BLOOD_GROUPS = {"Do not Know", ""}
 
 
 def create_tables(dynamodb_client):
-    """Create all 5 DynamoDB tables if they don't exist."""
-    existing = {t["TableName"] for t in dynamodb_client.list_tables()["TableNames"]}
+    """Create all 5 DynamoDB tables (on-demand billing). Migrate existing
+    provisioned tables to PAY_PER_REQUEST so bulk writes don't throttle."""
+    import time
+    existing = set(dynamodb_client.list_tables()["TableNames"])
 
     for table_name, config in TABLES.items():
         if table_name in existing:
-            logger.info(f"Table {table_name} already exists, skipping.")
+            # Migrate to on-demand if still using provisioned capacity
+            desc = dynamodb_client.describe_table(TableName=table_name)["Table"]
+            billing = desc.get("BillingModeSummary", {}).get("BillingMode", "PROVISIONED")
+            if billing == "PROVISIONED":
+                logger.info(f"Migrating {table_name} to PAY_PER_REQUEST...")
+                dynamodb_client.update_table(
+                    TableName=table_name,
+                    BillingMode="PAY_PER_REQUEST",
+                )
+                # Wait for update to complete
+                for _ in range(60):
+                    resp = dynamodb_client.describe_table(TableName=table_name)
+                    if resp["Table"]["TableStatus"] == "ACTIVE":
+                        break
+                    time.sleep(3)
+                logger.info(f"Table {table_name} migrated to on-demand.")
+            else:
+                logger.info(f"Table {table_name} already exists (on-demand), skipping.")
             continue
         try:
             dynamodb_client.create_table(TableName=table_name, **config)
@@ -133,7 +154,6 @@ def create_tables(dynamodb_client):
                 raise
 
     # Wait for all tables to be ACTIVE
-    import time
     for table_name in TABLES:
         for _ in range(60):
             resp = dynamodb_client.describe_table(TableName=table_name)
@@ -276,13 +296,32 @@ def transform_row(row: dict) -> dict | None:
     return item
 
 
-def batch_write(table, items: list, batch_size: int = 25):
-    """Write items in batches of 25 (DynamoDB limit)."""
-    for i in range(0, len(items), batch_size):
-        batch = items[i: i + batch_size]
+def batch_write(table, items: list, primary_key: str = "user_id"):
+    """Write items using DynamoDB batch_writer.
+
+    Deduplicates by primary key, then writes in chunks of 200 with a
+    brief pause between chunks to stay within on-demand burst limits.
+    boto3's batch_writer handles the 25-item API flush internally.
+    """
+    import time
+
+    seen: dict = {}
+    for item in items:
+        seen[item[primary_key]] = item
+    unique_items = list(seen.values())
+    if len(unique_items) < len(items):
+        logger.info(f"Deduped {len(items) - len(unique_items)} duplicate {primary_key}s → {len(unique_items)} unique items")
+
+    chunk_size = 200
+    total = len(unique_items)
+    for start in range(0, total, chunk_size):
+        chunk = unique_items[start: start + chunk_size]
         with table.batch_writer() as writer:
-            for item in batch:
+            for item in chunk:
                 writer.put_item(Item=item)
+        logger.info(f"  wrote {min(start + chunk_size, total)}/{total} items...")
+        if start + chunk_size < total:
+            time.sleep(0.5)
 
 
 def main():

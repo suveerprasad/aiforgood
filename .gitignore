@@ -1,0 +1,11 @@
+.env
+/node_modules
+/dist
+/build
+/coverage
+/logs
+/tmp
+/var
+/www
+/wwwroot
+/wwwroot   

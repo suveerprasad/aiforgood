@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { MessageCircle, X, Send, Bot } from 'lucide-react'
 import axios from 'axios'
 
-const LEX_ENDPOINT = import.meta.env.VITE_LEX_ENDPOINT || '/api/v1/webhooks/lex-fulfillment'
+const CHAT_ENDPOINT = import.meta.env.VITE_LEX_ENDPOINT || '/api/v1/webhooks/chat'
 
 export default function DonorChatWidget({ donorId, requestId, notificationId }) {
   const [open, setOpen] = useState(false)
@@ -31,17 +31,14 @@ export default function DonorChatWidget({ donorId, requestId, notificationId }) 
     setSending(true)
 
     try {
-      const res = await axios.post(LEX_ENDPOINT, {
-        inputTranscript: text,
-        sessionState: {
-          sessionAttributes: {
-            donor_id: donorId || '',
-            request_id: requestId || '',
-            notification_id: notificationId || '',
-          },
-        },
+      const res = await axios.post(CHAT_ENDPOINT, {
+        message: text,
+        donor_id: donorId || '',
+        request_id: requestId || '',
+        notification_id: notificationId || '',
+        session_id: donorId || 'anon-session',
       })
-      const botText = res.data?.messages?.[0]?.content || "I didn't quite catch that. Try: YES, RESCHEDULE, or NO."
+      const botText = res.data?.reply || "I didn't quite catch that. Try: YES, RESCHEDULE, or NO."
       setMessages((m) => [...m, { id: Date.now() + 1, speaker: 'bot', text: botText }])
     } catch {
       setMessages((m) => [
@@ -123,7 +120,28 @@ export default function DonorChatWidget({ donorId, requestId, notificationId }) 
             {['Yes, I confirm', 'Reschedule', 'No, decline', 'Help'].map((q) => (
               <button
                 key={q}
-                onClick={() => { setInput(q); setTimeout(sendMessage, 100) }}
+                onClick={async () => {
+                  if (sending) return
+                  const text = q
+                  const userMsg = { id: Date.now(), speaker: 'user', text }
+                  setMessages((m) => [...m, userMsg])
+                  setSending(true)
+                  try {
+                    const res = await axios.post(CHAT_ENDPOINT, {
+                      message: text,
+                      donor_id: donorId || '',
+                      request_id: requestId || '',
+                      notification_id: notificationId || '',
+                      session_id: donorId || 'anon-session',
+                    })
+                    const botText = res.data?.reply || "I didn't quite catch that."
+                    setMessages((m) => [...m, { id: Date.now() + 1, speaker: 'bot', text: botText }])
+                  } catch {
+                    setMessages((m) => [...m, { id: Date.now() + 1, speaker: 'bot', text: 'Sorry, connection error. Call 1800-XXX-XXXX.' }])
+                  } finally {
+                    setSending(false)
+                  }
+                }}
                 className="text-xs bg-slate-100 hover:bg-red-50 hover:text-red-700 text-slate-600 px-2.5 py-1 rounded-full transition-colors border border-slate-200"
               >
                 {q}

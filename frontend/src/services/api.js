@@ -8,13 +8,35 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
+// Attach JWT token to every request if present
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('bb_token')
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
+})
+
 api.interceptors.response.use(
   (res) => res,
   (err) => {
     console.error('API Error:', err.response?.data || err.message)
+    if (err.response?.status === 401) {
+      localStorage.removeItem('bb_token')
+      localStorage.removeItem('bb_user')
+    }
     return Promise.reject(err)
   }
 )
+
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+export const registerUser = (data) => api.post('/auth/register', data)
+export const loginUser = (email, password) => {
+  const form = new URLSearchParams()
+  form.append('username', email)
+  form.append('password', password)
+  return api.post('/auth/login', form, { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })
+}
+export const getMe = () => api.get('/auth/me')
+export const updateMe = (data) => api.put('/auth/me', data)
 
 // ─── Patients / Requests ────────────────────────────────────────────────────
 export const createRequest = (data) => api.post('/patients/requests', data)
@@ -50,5 +72,8 @@ export const runGuestCampaign = (dryRun = false) => api.post('/insights/guest-ca
 
 // ─── Webhooks ────────────────────────────────────────────────────────────────
 export const recordDonorResponse = (data) => api.post('/webhooks/donor-response', data)
+export const donorVolunteer = (data) => api.post('/webhooks/donor-volunteer', data)
+export const getDonorNotifications = (donorId) => api.get('/webhooks/donor-notifications', { params: { donor_id: donorId } })
+export const getEligibleRequests = (donorId) => api.get('/matching/eligible-requests', { params: { donor_id: donorId } })
 
 export default api

@@ -17,6 +17,11 @@ from app.services.inventory_manager import (
     get_inventory_summary,
 )
 
+def _requests_table():
+    return boto3.resource("dynamodb", region_name=get_settings().AWS_REGION).Table(
+        get_settings().DYNAMODB_REQUESTS_TABLE
+    )
+
 router = APIRouter()
 settings = get_settings()
 logger = logging.getLogger("bloodbridge.inventory")
@@ -85,13 +90,72 @@ def reallocate(blood_unit_id: str, new_request_id: str):
 
 @router.post("/requests/{request_id}/issue")
 def issue_blood(request_id: str):
-    """Mark reserved units as Issued when transfusion occurs."""
-    count = issue_units(request_id)
-    return {"request_id": request_id, "units_issued": count}
+    """
+    Mark reserved units as Issued when transfusion occurs.
+    If no units are reserved (donor-volunteered match), picks available Collected
+    units from stock and issues them directly.
+    Sets the request status to 'fulfilled'.
+    """
+    req_table = _requests_table()
+    req = req_table.get_item(Key={"request_id": request_id}).get("Item")
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+    if req.get("status") == "fulfilled":
+        raise HTTPException(status_code=400, detail="Request is already fulfilled")
+    if req.get("status") == "cancelled":
+        raise HTTPException(status_code=400, detail="Cannot issue for a cancelled request")
+
+    blood_group = req.get("blood_group")
+    units_needed = int(req.get("units_needed", 1))
+
+    count = issue_units(request_id, blood_group=blood_group, units_needed=units_needed)
+
+    if count == 0:
+        raise HTTPException(
+            status_code=422,
+            detail=f"No blood units available for {blood_group}. Add stock first."
+        )
+
+    # Mark request as fulfilled
+    req_table.update_item(
+        Key={"request_id": request_id},
+        UpdateExpression="SET #s = :fulfilled, units_issued = :count, issued_at = :now",
+        ExpressionAttributeNames={"#s": "status"},
+        ExpressionAttributeValues={
+            ":fulfilled": "fulfilled",
+            ":count": count,
+            ":now": datetime.utcnow().isoformat(),
+        },
+    )
+    logger.info(f"Issued {count} unit(s) for request {request_id} — status: fulfilled")
+    return {"request_id": request_id, "units_issued": count, "status": "fulfilled"}
 
 
 @router.post("/requests/{request_id}/release")
 def release_blood(request_id: str):
-    """Release reserved units back to available when a request is cancelled."""
+    """
+    Release reserved units back to available when a request is cancelled.
+    Sets the request status to 'cancelled'.
+    """
+    req_table = _requests_table()
+    req = req_table.get_item(Key={"request_id": request_id}).get("Item")
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+    if req.get("status") == "cancelled":
+        raise HTTPException(status_code=400, detail="Request is already cancelled")
+    if req.get("status") == "fulfilled":
+        raise HTTPException(status_code=400, detail="Cannot release units from a fulfilled request")
+
     count = release_reservation(request_id)
-    return {"request_id": request_id, "units_released": count}
+
+    req_table.update_item(
+        Key={"request_id": request_id},
+        UpdateExpression="SET #s = :cancelled, updated_at = :now",
+        ExpressionAttributeNames={"#s": "status"},
+        ExpressionAttributeValues={
+            ":cancelled": "cancelled",
+            ":now": datetime.utcnow().isoformat(),
+        },
+    )
+    logger.info(f"Released {count} unit(s) for request {request_id} — status: cancelled")
+    return {"request_id": request_id, "units_released": count, "status": "cancelled"}

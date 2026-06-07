@@ -27,6 +27,7 @@ class BloodRequest(BaseModel):
     blood_group: str
     units_needed: int = 1
     urgency_level: UrgencyLevel = UrgencyLevel.STANDARD
+    transfusion_date: Optional[str] = None
     status: RequestStatus = RequestStatus.OPEN
     collection_window_start: Optional[str] = None
     collection_window_end: Optional[str] = None
@@ -43,6 +44,8 @@ class CreateRequestInput(BaseModel):
     units_needed: int = 1
     transfusion_date: str
     notes: Optional[str] = None
+    patient_lat: Optional[float] = None
+    patient_lon: Optional[float] = None
 
 
 class UpdateRequestInput(BaseModel):

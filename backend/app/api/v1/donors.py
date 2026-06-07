@@ -34,26 +34,43 @@ def list_donors(
     role: str = Query(None, description="Filter by role: Bridge Donor, Emergency Donor, Guest"),
     blood_group: str = Query(None),
     eligible_only: bool = Query(False),
-    limit: int = Query(100, le=500),
+    system_role: str = Query(None),
 ):
     table = _users_table()
     filters = []
+
+    # By default show all donor-type users (exclude pure patients)
     if role:
         filters.append(Attr("role").eq(role))
+    else:
+        # Include all donor roles (from CSV data and newly registered users)
+        filters.append(
+            Attr("role").is_in(["Bridge Donor", "Emergency Donor", "Guest", "Volunteer"])
+            | Attr("system_role").eq("donor")
+        )
+
     if blood_group:
         filters.append(Attr("blood_group").eq(blood_group))
     if eligible_only:
         filters.append(Attr("eligibility_status").eq("eligible"))
+    if system_role:
+        filters.append(Attr("system_role").eq(system_role))
 
-    kwargs: dict = {"Limit": limit}
-    if filters:
-        expr = filters[0]
-        for f in filters[1:]:
-            expr = expr & f
-        kwargs["FilterExpression"] = expr
+    expr = filters[0]
+    for f in filters[1:]:
+        expr = expr & f
 
-    resp = table.scan(**kwargs)
-    items = resp.get("Items", [])
+    # Full paginated scan — never cut off records due to DynamoDB's Limit
+    items = []
+    kwargs: dict = {"FilterExpression": expr}
+    while True:
+        resp = table.scan(**kwargs)
+        items.extend(resp.get("Items", []))
+        last_key = resp.get("LastEvaluatedKey")
+        if not last_key:
+            break
+        kwargs["ExclusiveStartKey"] = last_key
+
     items.sort(key=lambda x: float(x.get("donor_score") or 0), reverse=True)
     return {"donors": items, "count": len(items)}
 

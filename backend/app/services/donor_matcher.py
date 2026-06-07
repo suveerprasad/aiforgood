@@ -65,12 +65,12 @@ def match_donors(
     if len(candidates) >= top_n:
         return _sort_and_trim(candidates, top_n)
 
-    # ── Stage 2: Emergency donors with expanding radius ─────────────────────
+    # ── Stage 2: Emergency + Bridge donors with expanding radius ───────────
     radii = SEARCH_RADII_KM if initial_radius <= 10 else [initial_radius]
     for radius_km in radii:
         resp = table.scan(
             FilterExpression=(
-                Attr("role").eq("Emergency Donor")
+                Attr("role").is_in(["Emergency Donor", "Bridge Donor"])
                 & Attr("blood_group").is_in(compatible_groups)
                 & Attr("eligibility_status").eq("eligible")
                 & Attr("consent_given").eq(True)

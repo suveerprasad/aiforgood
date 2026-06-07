@@ -25,8 +25,14 @@ export default function Donors() {
 
   useEffect(() => { load() }, [filters])
 
+  const q = search.toLowerCase()
   const filtered = search
-    ? donors.filter(d => d.user_id?.includes(search) || d.blood_group?.toLowerCase().includes(search.toLowerCase()))
+    ? donors.filter(d =>
+        d.name?.toLowerCase().includes(q) ||
+        d.email?.toLowerCase().includes(q) ||
+        d.blood_group?.toLowerCase().includes(q) ||
+        d.user_id?.includes(q)
+      )
     : donors
 
   const stats = {
@@ -63,7 +69,7 @@ export default function Donors() {
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Search by ID or blood group…"
+              placeholder="Search by name, email or blood group…"
               className="flex-1 text-sm outline-none text-slate-800 placeholder-slate-400"
             />
           </div>

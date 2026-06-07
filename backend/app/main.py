@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
-from app.api.v1 import patients, donors, matching, inventory, insights, webhooks
+from app.api.v1 import patients, donors, matching, inventory, insights, webhooks, auth
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("bloodbridge")
@@ -54,6 +54,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(patients.router, prefix="/api/v1/patients", tags=["patients"])
 app.include_router(donors.router, prefix="/api/v1/donors", tags=["donors"])
 app.include_router(matching.router, prefix="/api/v1/matching", tags=["matching"])

@@ -91,24 +91,59 @@ def release_reservation(request_id: str) -> int:
     return count
 
 
-def issue_units(request_id: str) -> int:
-    """Mark reserved units as Issued when transfusion happens."""
+def issue_units(request_id: str, blood_group: Optional[str] = None, units_needed: int = 1) -> int:
+    """
+    Mark reserved units as Issued when transfusion happens.
+
+    If no Reserved units exist for this request (e.g. donor-volunteered match
+    that bypassed inventory reservation), find available Collected units and
+    issue them directly.
+    """
     table = _get_table()
+    now = datetime.utcnow().isoformat()
+
+    # Try existing Reserved units first
     resp = table.scan(
         FilterExpression=Attr("reserved_for_request").eq(request_id) & Attr("status").eq("Reserved")
     )
+    reserved = resp.get("Items", [])
+
+    if reserved:
+        count = 0
+        for unit in reserved:
+            table.update_item(
+                Key={"blood_unit_id": unit["blood_unit_id"]},
+                UpdateExpression="SET #s = :issued, updated_at = :now",
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues={":issued": "Issued", ":now": now},
+            )
+            count += 1
+        return count
+
+    # No Reserved units — issue directly from Collected stock
+    if not blood_group:
+        return 0
+
+    available = check_inventory(blood_group, units_needed)
+    to_issue = available[:units_needed]
     count = 0
-    for unit in resp.get("Items", []):
-        table.update_item(
-            Key={"blood_unit_id": unit["blood_unit_id"]},
-            UpdateExpression="SET #s = :issued, updated_at = :now",
-            ExpressionAttributeNames={"#s": "status"},
-            ExpressionAttributeValues={
-                ":issued": "Issued",
-                ":now": datetime.utcnow().isoformat(),
-            },
-        )
-        count += 1
+    for unit in to_issue:
+        try:
+            table.update_item(
+                Key={"blood_unit_id": unit["blood_unit_id"]},
+                UpdateExpression="SET #s = :issued, reserved_for_request = :req, updated_at = :now",
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues={
+                    ":issued": "Issued",
+                    ":req": request_id,
+                    ":now": now,
+                    ":collected": "Collected",
+                },
+                ConditionExpression=Attr("status").eq("Collected"),
+            )
+            count += 1
+        except Exception:
+            pass
     return count
 
 

@@ -11,7 +11,8 @@ import json
 import time
 import boto3
 
-REGION = "ap-south-1"
+import os
+REGION = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
 
 client = boto3.client("lexv2-models", region_name=REGION)
 
@@ -38,8 +39,9 @@ def create_bot(role_arn: str, fulfillment_lambda_arn: str) -> dict:
         botVersion="DRAFT",
         localeId="en_IN",
         nluIntentConfidenceThreshold=0.4,
-        voiceSettings={"voiceId": "Aditi", "engine": "neural"},
     )
+    # Wait for locale to finish creating before adding intents
+    _wait_for_locale(bot_id, "NotBuilt")
 
     # Create intents
     _create_intents(bot_id, fulfillment_lambda_arn)
@@ -166,10 +168,18 @@ def _wait_for_locale(bot_id: str, target_status: str, timeout: int = 300):
 
 
 def _wait_for_bot_version(bot_id: str, version: str, timeout: int = 120):
+    import botocore.exceptions
+    time.sleep(5)  # Give AWS a moment to register the version
     for _ in range(timeout // 5):
-        resp = client.describe_bot_version(botId=bot_id, botVersion=version)
-        if resp["botStatus"] == "Available":
-            return
+        try:
+            resp = client.describe_bot_version(botId=bot_id, botVersion=version)
+            if resp["botStatus"] == "Available":
+                return
+        except botocore.exceptions.ClientError as e:
+            if e.response["Error"]["Code"] == "ResourceNotFoundException":
+                pass  # Version not yet queryable, retry
+            else:
+                raise
         time.sleep(5)
 
 
