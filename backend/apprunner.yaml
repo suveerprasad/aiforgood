@@ -11,8 +11,8 @@ run:
     env: APP_PORT
   env:
     - name: AWS_REGION
-      value: ap-south-1
-    - name: SECRET_NAME
-      value: bloodbridge/config
+      value: us-east-1
     - name: ENVIRONMENT
       value: production
+    - name: SECRET_NAME
+      value: bloodbridge/config
