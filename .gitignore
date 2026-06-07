@@ -1,11 +1,63 @@
+# Environment files — NEVER commit these
 .env
-/node_modules
-/dist
-/build
-/coverage
-/logs
-/tmp
-/var
-/www
-/wwwroot
-/wwwroot   
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+venv/
+.venv/
+env/
+.Python
+pip-log.txt
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+*.log
+
+# Node / Frontend
+node_modules/
+frontend/dist/
+frontend/build/
+.npm
+.yarn
+*.tsbuildinfo
+
+# AWS / Secrets
+*.pem
+*.key
+credentials
+.aws/
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# IDE
+.vscode/settings.json
+.idea/
+*.iml
+
+# Docker
+*.tar
+
+# Temporary
+/tmp/
+/var/
+/logs/
+/www/
+/wwwroot/
